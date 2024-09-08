@@ -1,5 +1,5 @@
 {
-  "app": "npx ts-node --prefer-ts-exts bin/ecs-saas-ref-template.ts",
+  "app": "npx ts-node --prefer-ts-exts bin/lambda-ecs-saas-ref-template.ts",
   "watch": {
     "include": ["**"],
     "exclude": [
