@@ -1,3 +1,4 @@
+import { Duration } from 'aws-cdk-lib'
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as s3 from 'aws-cdk-lib/aws-s3';
@@ -44,18 +45,37 @@ export class LambdaStaticSite extends Construct {
       wellKnownEndpointUrl: props.wellKnownEndpointUrl,
     };
 
+     // Lambda Layer containing the unzip command
+     const unzipLayer = new lambda.LayerVersion(this, 'UnzipLayer', {
+      code: lambda.Code.fromAsset('lib/bootstrap-template/unzip-layer.zip'),  // Update this path to your zipped layer file
+      compatibleRuntimes: [lambda.Runtime.NODEJS_20_X],
+      description: 'A layer containing the unzip binary for the build function.',
+    });
+
     // Lambda function to handle the build process
     const buildFunction = new lambda.Function(this, `${props.name}BuildLambda`, {
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'index.handler',
       code: lambda.Code.fromInline(`
-        const AWS = require('aws-sdk');
-        const unzipper = require('unzipper');
+        //const AWS = require('aws-sdk');
         const fs = require('fs');
         const path = require('path');
         const { execSync } = require('child_process');
 
-        const s3 = new AWS.S3();
+        //const s3 = new AWS.S3();
+        const { S3Client, GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
+        // Create an instance of the S3 client
+        const s3Client = new S3Client();
+
+        // Helper function to convert stream to Buffer
+        function streamToBuffer(stream) {
+          return new Promise((resolve, reject) => {
+            const chunks = [];
+            stream.on('data', (chunk) => chunks.push(chunk));
+            stream.on('error', reject);
+            stream.on('end', () => resolve(Buffer.concat(chunks)));
+          });
+        }
 
         exports.handler = async (event) => {
           console.log('Lambda function triggered by S3 event:', JSON.stringify(event, null, 2));
@@ -71,18 +91,18 @@ export class LambdaStaticSite extends Construct {
             try {
               console.log('Downloading source code from S3...');
               const params = { Bucket: bucketName, Key: key };
-              const data = await s3.getObject(params).promise();
+              //const data = await s3.getObject(params).promise();
+              const data = await s3Client.send(new GetObjectCommand(params));
+              const bodyContents = await streamToBuffer(data.Body);
               const zipPath = '/tmp/source.zip';
-              fs.writeFileSync(zipPath, data.Body);
+              fs.writeFileSync(zipPath, bodyContents);
               console.log('Source code downloaded to:', zipPath);
 
-              // Unzip the source code into /tmp directory
+              // Unzip the source code using shell command
               const extractPath = '/tmp/source';
-              fs.mkdirSync(extractPath);
               console.log('Unzipping source code...');
-              await fs.createReadStream(zipPath)
-                .pipe(unzipper.Extract({ path: extractPath }))
-                .promise();
+              fs.mkdirSync(extractPath);
+              execSync(\`/opt/bin/unzip -o \${zipPath} -d \${extractPath}\`, { stdio: 'inherit' });
               console.log('Source code unpacked to:', extractPath);
 
               return extractPath;
@@ -99,10 +119,11 @@ export class LambdaStaticSite extends Construct {
 
             // Change working directory to the source path
             process.chdir(sourcePath);
+            process.env.NPM_CONFIG_CACHE = '/tmp/.npm';
 
             // Install npm packages
             console.log('Running npm install...');
-            execSync('npm install --force', { stdio: 'inherit' });
+            execSync('ls && npm install --force', { stdio: 'inherit' });
             console.log('npm install completed.');
 
             // Write environment configuration
@@ -114,6 +135,7 @@ export class LambdaStaticSite extends Construct {
             fs.writeFileSync(envProdPath, configContent);
             fs.writeFileSync(envDevPath, configContent);
             console.log('Environment configuration written to:', envProdPath, 'and', envDevPath);
+            console.log(configContent)
 
             // Run the build command
             console.log('Running npm run build...');
@@ -127,15 +149,33 @@ export class LambdaStaticSite extends Construct {
 
             for (const file of files) {
               const filePath = path.join(distPath, file);
+
+              const stats = fs.statSync(filePath);
+              if (stats.isDirectory()) continue; 
               const fileContent = fs.readFileSync(filePath);
 
-              await s3.putObject({
+              var contentType = 'application/octet-stream';
+              if (filePath.endsWith('.html')) contentType = 'text/html';
+              if (filePath.endsWith('.js')) contentType = 'text/javascript';
+              if (filePath.endsWith('.css')) contentType = 'text/css';
+
+              //await s3.putObject({
+              //  Bucket: '${props.appBucket.bucketName}',
+              //  Key: \`\${file}\`,
+              //  Body: fileContent,
+              //  CacheControl: 'no-store',
+              //}).promise();
+
+              const putObjectParams = {
                 Bucket: '${props.appBucket.bucketName}',
                 Key: \`\${file}\`,
                 Body: fileContent,
                 CacheControl: 'no-store',
-              }).promise();
+                ContentType: \`\${contentType}\`,
+              }
 
+              const data = await s3Client.send(new PutObjectCommand(putObjectParams));
+              console.log('File uploaded successfully:', data);
               console.log(\`Uploaded \${file} to S3\`);
             }
 
@@ -151,10 +191,11 @@ export class LambdaStaticSite extends Construct {
         };
       `),
       memorySize: 1024,
-      //timeout: lambda.Duration.minutes(5),
+      timeout: Duration.minutes(5),
       environment: {
         BUCKET_NAME: props.appBucket.bucketName,
       },
+      layers: [unzipLayer],  // Add the Lambda Layer here
     });
 
     // Grant permissions for Lambda to access S3

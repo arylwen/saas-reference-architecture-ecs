@@ -12,6 +12,13 @@ interface ControlPlaneStackProps extends cdk.StackProps {
   systemAdminEmail: string
 }
 
+function replaceCognitoUrl(url: string, region: string) {
+  // Replace the placeholder with the desired value
+  const replacedUrl = url.replace(`https://cognito-idp.${region}.amazonaws.com`, 'http://localhost:4566');
+
+  return replacedUrl;
+}
+
 export class LambdaControlPlaneStack extends cdk.Stack {
   public readonly regApiGatewayUrl: string;
   public readonly eventManager: sbt.IEventManager;
@@ -59,6 +66,9 @@ export class LambdaControlPlaneStack extends cdk.Stack {
     this.regApiGatewayUrl = controlPlane.controlPlaneAPIGatewayUrl;
     this.auth = cognitoAuth;
 
+    // TODO get region from current stack
+    const lstkWellKnownEndpointUrl = replaceCognitoUrl(this.auth.wellKnownEndpointUrl, 'us-east-1')
+
     const staticSite = new LambdaStaticSite(this, 'AdminWebUi', {
       name: 'AdminSite',
       assetDirectory: path.join(__dirname, '../../../client/AdminWeb'),
@@ -66,7 +76,8 @@ export class LambdaControlPlaneStack extends cdk.Stack {
       clientId: this.auth.userClientId,  //.clientId,
       issuer: this.auth.tokenEndpoint,
       apiUrl: this.regApiGatewayUrl,
-      wellKnownEndpointUrl: this.auth.wellKnownEndpointUrl,
+      //wellKnownEndpointUrl: this.auth.wellKnownEndpointUrl,
+      wellKnownEndpointUrl: lstkWellKnownEndpointUrl,
       distribution: distro.cloudfrontDistribution,
       appBucket: distro.siteBucket,
       accessLogsBucket
