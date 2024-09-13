@@ -46,7 +46,7 @@ fi
 echo "Bucket exists2: $CDK_PARAM_S3_BUCKET_NAME"
 
 cd ../
-zip -r source.zip . -x ".git/*" -x "**/node_modules/*" -x "**/cdk.out/*" -x "**/.aws-sam/*"
+zip -r source.zip . -x ".git/*" -x "**/node_modules/*" -x "**/cdk.out/*" -x "**/.aws-sam/*" -x "**/pro-ephemeral-neptune/*"
 export CDK_PARAM_COMMIT_ID=$(aws --endpoint-url=https://localhost:4566 --no-verify-ssl s3api put-object --bucket "${CDK_PARAM_S3_BUCKET_NAME}" --key "source.zip" --body "./source.zip"  --output text)
 
 rm source.zip

@@ -14,7 +14,8 @@ interface ControlPlaneStackProps extends cdk.StackProps {
 
 function replaceCognitoUrl(url: string, region: string) {
   // Replace the placeholder with the desired value
-  const replacedUrl = url.replace(`https://cognito-idp.${region}.amazonaws.com`, 'http://localhost:4566');
+  //const replacedUrl = url.replace(`https://cognito-idp.${region}.amazonaws.com`, 'http://localhost:4566');
+  const replacedUrl = url.replace(`https://cognito-idp.${region}.amazonaws.com`, 'https://localhost.localstack.cloud:4566');
 
   return replacedUrl;
 }

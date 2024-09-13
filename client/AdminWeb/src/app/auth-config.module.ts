@@ -1,6 +1,7 @@
 import { NgModule } from '@angular/core';
-import { AuthModule, LogLevel } from 'angular-auth-oidc-client';
+import { AuthModule, LogLevel, OidcSecurityService } from 'angular-auth-oidc-client';
 import { environment } from 'src/environments/environment';
+import { LstkOidcSecurityService } from './lstk-oidc-security-service';
 
 @NgModule({
   imports: [
@@ -14,9 +15,15 @@ import { environment } from 'src/environments/environment';
         redirectUrl: window.location.origin,
         responseType: 'code',
         scope: 'openid profile email tenant/tenant_read tenant/tenant_write user/user_read user/user_write',
+        ignoreNonceAfterRefresh: true, 
+        disableIdTokenValidation: true,
       },
     }),
-  ],
+  ],  
+  //lstck bug https://github.com/localstack/localstack/issues/11501, remove when fixed
+  providers: [
+    { provide: OidcSecurityService, useClass: LstkOidcSecurityService },
+  ],  
   exports: [AuthModule],
 })
 export class AuthConfigModule {}

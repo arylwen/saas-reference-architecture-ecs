@@ -57,12 +57,10 @@ export class LambdaStaticSite extends Construct {
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'index.handler',
       code: lambda.Code.fromInline(`
-        //const AWS = require('aws-sdk');
         const fs = require('fs');
         const path = require('path');
         const { execSync } = require('child_process');
 
-        //const s3 = new AWS.S3();
         const { S3Client, GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
         // Create an instance of the S3 client
         const s3Client = new S3Client();
@@ -142,43 +140,44 @@ export class LambdaStaticSite extends Construct {
             execSync('npm run build', { stdio: 'inherit' });
             console.log('Build process completed.');
 
-            // Upload built files to S3
             console.log('Uploading built files to S3...');
+
             const distPath = path.join(sourcePath, 'dist');
-            const files = fs.readdirSync(distPath);
+            const stack = [distPath];
 
-            for (const file of files) {
-              const filePath = path.join(distPath, file);
+            while (stack.length > 0) {
+              const currentDir = stack.pop();
+              const files = fs.readdirSync(currentDir);
 
-              const stats = fs.statSync(filePath);
-              if (stats.isDirectory()) continue; 
-              const fileContent = fs.readFileSync(filePath);
+              for (const file of files) {
+                const filePath = path.join(currentDir, file);
+                const stats = fs.statSync(filePath);
 
-              var contentType = 'application/octet-stream';
-              if (filePath.endsWith('.html')) contentType = 'text/html';
-              if (filePath.endsWith('.js')) contentType = 'text/javascript';
-              if (filePath.endsWith('.css')) contentType = 'text/css';
+                if (stats.isDirectory()) {
+                  stack.push(filePath);  // Add directory to stack for later processing
+                } else {
+                  const fileContent = fs.readFileSync(filePath);
 
-              //await s3.putObject({
-              //  Bucket: '${props.appBucket.bucketName}',
-              //  Key: \`\${file}\`,
-              //  Body: fileContent,
-              //  CacheControl: 'no-store',
-              //}).promise();
+                  let contentType = 'application/octet-stream';
+                  if (filePath.endsWith('.html')) contentType = 'text/html';
+                  if (filePath.endsWith('.js')) contentType = 'text/javascript';
+                  if (filePath.endsWith('.css')) contentType = 'text/css';
 
-              const putObjectParams = {
-                Bucket: '${props.appBucket.bucketName}',
-                Key: \`\${file}\`,
-                Body: fileContent,
-                CacheControl: 'no-store',
-                ContentType: \`\${contentType}\`,
+                  const putObjectParams = {
+                    Bucket: '${props.appBucket.bucketName}',
+                    Key: \`\${path.relative(distPath, filePath)}\`,
+                    Body: fileContent,
+                    CacheControl: 'no-store',
+                    ContentType: \`\${contentType}\`,
+                  };
+
+                  const data = await s3Client.send(new PutObjectCommand(putObjectParams));
+                  console.log('File uploaded successfully:', data);
+                  console.log(\`Uploaded \${filePath} to S3\`);
+                }
               }
-
-              const data = await s3Client.send(new PutObjectCommand(putObjectParams));
-              console.log('File uploaded successfully:', data);
-              console.log(\`Uploaded \${file} to S3\`);
             }
-
+            
             console.log('All built files uploaded to S3.');
             return {
               statusCode: 200,
@@ -218,5 +217,9 @@ export class LambdaStaticSite extends Construct {
       extract: false,
       prune: false,
     });
+
+    // Add dependency to ensure BucketDeployment occurs after the bucket and Lambda are ready
+    bucketDeployment.node.addDependency(sourceCodeBucket);
+    bucketDeployment.node.addDependency(buildFunction);
   }
 }
